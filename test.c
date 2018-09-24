@@ -1,18 +1,6 @@
 /*
-Nokia Sensorboard
-* 
-* Done:
-* => Read Sensor BME280
-* => Write Sensor Data on Display
-* => Write Sensor Data on USART (formatted for KST plotting with KST)
-* 
-* Pending:
-* 
-* => read / write EEPROM (12C)
-* => read / write RTC (I2C)
-* => logging function
-* 
-* 
+
+
 */
 #define F_CPU 16000000UL  // 1 MHz
 #include <avr/io.h>
@@ -53,7 +41,7 @@ volatile uint8_t 	received_byte;
 int32_t temp, press, hum;
 uint16_t vork, nachk; 
 
-uint8_t flag_send, flag_send_index;
+
 // String für Zahlenausgabe
 char string[30] = "";
 
@@ -154,8 +142,8 @@ int main(void)
 {
 	/* Backlight pin PL3, set as output, set high for 100% output */
 	DDRB |= (1<<PB2);
-	PORTB |= (1<<PB2);
-	//PORTB &= ~(1<<PB2);
+	//PORTB |= (1<<PB2);
+	PORTB &= ~(1<<PB2);
 	
 	
 	DDRC |=(1<<PC3); 	//Ausgang LED
@@ -220,8 +208,7 @@ int main(void)
 	humidity = 0;
 	nachk =0;
 	vork =0;
-	flag_send=0;
-	flag_send_index=0;
+
 
 	
 		glcd_tiny_set_font(Font5x7,5,7,32,127);
@@ -233,7 +220,7 @@ int main(void)
    BME280_set_filter(BME280_FILTER_16);
 	BME280_set_standby(BME280_TSB_10);
    BME280_set_measure(BME280_OVER_16, BME280_HUM);
-   BME280_set_measure(BME280_OVER_16,  BME280_PRESS);
+   BME280_set_measure(BME280_OVER_4,  BME280_PRESS);
    BME280_set_measure(BME280_OVER_16, BME280_TEMP);
    BME280_set_measuremode(BME280_MODE_NORM);
 	
@@ -248,12 +235,17 @@ int main(void)
 		*/
 		
 		
-			
+		
 		
 		while(1) 
 		{	
-			
-			
+			uart_send_string("Test");
+		uart_send_char(';');
+		uart_send_char('B');
+		uart_send_char(';');
+		uart_send_char('C');
+		uart_send_char('\r');
+		uart_send_char('\n');
 			BME280_readout(&temp, &press, &hum);
 				
 			
@@ -277,78 +269,45 @@ int main(void)
 				$T or $t= tabulator
 				$N or $n= new line"
 			 * */
-			 
-			 if(flag_send==1)
-			 {
-				 if(flag_send_index==0)
-				 {
-					flag_send_index=1;
-					uart_send_char('A');
-					uart_send_char('\r');
-					uart_send_char('\n');
-					uart_send_string("Feuchtigkeit");
-					uart_send_char(';');
-					uart_send_string("Temperatur");
-					uart_send_char(';');
-					uart_send_string("Luftdruck");
-					uart_send_char('\r');
-					uart_send_char('\n');
-					uart_send_char(';');
-					uart_send_string("%");
-					uart_send_char(';');
-					uart_send_string("C");
-					uart_send_char(';');
-					uart_send_string("hPa");
-					uart_send_char('\r');
-					uart_send_char('\n');
-				 }
-					 
-				/*Umwandlung in Vorkomma und Nachkommawerte 
-				 * um ueber uart float uebertragen zu können*/
-				vork = hum/1024;
-				nachk = hum-vork*1024;
-							
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				uart_send_char(';');
-				
-				vork = temp /100;
-				nachk = temp-vork*100;
-				
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				uart_send_char(';');
-				
-				vork = press/100;
-				nachk = press-vork*100;
-				
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				
-				uart_send_char('\r');
-				uart_send_char('\n');
-			}
+			/*Umwandlung in Vorkomma und Nachkommawerte 
+			 * um ueber uart float uebertragen zu können*/
+			vork = hum/1000;
+			nachk = hum-vork*1000;
+						
+			uart_send_u16data(vork);
+			uart_send_char('.');
+			uart_send_u16data(nachk);
+			uart_send_char(';');
+			
+			vork = temp /100;
+			nachk = temp-vork*100;
+			
+			uart_send_u16data(vork);
+			uart_send_char('.');
+			uart_send_u16data(nachk);
+			uart_send_char(';');
+			
+			vork = press/100;
+			nachk = press-vork*100;
+			
+			uart_send_u16data(vork);
+			uart_send_char('.');
+			uart_send_u16data(nachk);
+			
+			uart_send_char('\r');
+			uart_send_char('\n');
 			
 			
 				
-
+		
 		
 		
 		if(T_RED)
 		{
-			flag_send=1;
 			LED_AUS;
-			flag_send_index=0;
-		}
-		
-		if(T_BLUE)
+		}else
 		{
 			LED_EIN;
-			flag_send=0;
-			flag_send_index=1;
 		}
 		
 	

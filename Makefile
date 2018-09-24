@@ -42,7 +42,7 @@ MCU = atmega328p
 
 # Main Oscillator Frequency
 # This is only used to define F_OSC in all assembler and c-sources.
-F_OSC = 16000000
+F_OSC = 8000000
 
 # Output format. (can be srec, ihex, binary)
 FORMAT = ihex
@@ -52,7 +52,7 @@ TARGET = main
 
 
 # List C source files here. (C dependencies are automatically generated.)
-SRC = $(TARGET).c glcd/glcd.c glcd/devices/AVR8.c glcd/controllers/PCD8544.c glcd/graphs.c glcd/text.c glcd/graphics.c glcd/unit_tests.c glcd/text_tiny.c bme280_i2c.c twimaster.c
+SRC = $(TARGET).c glcd/glcd.c glcd/devices/AVR8.c glcd/controllers/PCD8544.c glcd/graphs.c glcd/text.c glcd/graphics.c glcd/unit_tests.c glcd/text_tiny.c bme280_i2c.c twimaster.c grn_UART.c
 
 # List Assembler source files here.
 # Make them always end in a capital .S.  Files ending in a lowercase .s
