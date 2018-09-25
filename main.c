@@ -1,20 +1,16 @@
 /*
 Nokia Sensorboard
 * 
-* Done:
-* => Read Sensor BME280
-* => Write Sensor Data on Display
-* => Write Sensor Data on USART (formatted for KST plotting with KST)
+* TWI Bus scannen und antwortende Addressen ausgeben.
 * 
-* Pending:
+* Probleme: 0x41 stopt programm
 * 
-* => read / write EEPROM (12C)
-* => read / write RTC (I2C)
-* => logging function
 * 
 * 
 */
-#define F_CPU 16000000UL  // 1 MHz
+
+
+#define F_CPU 8000000UL  // 1 MHz
 #include <avr/io.h>
 #include "glcd/glcd.h"
 #include <avr/interrupt.h>
@@ -23,12 +19,7 @@ Nokia Sensorboard
 #include "glcd/fonts/Liberation_Sans15x21_Numbers.h"
 #include "glcd/fonts/font5x7.h"
 #include <avr/pgmspace.h>
-#include "bme280_i2c.h"
-#include "i2cmaster.h"
-#include "grn_UART.h"
-
-
-
+#include <util/delay.h>
 
 #define T_RED !(PIND & (1<<PD5)) && (entprell == 0)
 #define T_BLUE !(PIND & (1<<PD6)) && (entprell == 0)
@@ -36,33 +27,24 @@ Nokia Sensorboard
 #define RELOAD_ENTPRELL 80
 
 #define LED_EIN PORTC |= (1<<PC3)
-#define LED_AUS	PORTC &= ~(1<<PC3);					//LED ausschalten
+#define LED_AUS	PORTC &= ~(1<<PC3)					//LED ausschalten
+
+#define TW_START 0xA4 // send start condition (TWINT,TWSTA,TWEN)
+#define TW_READY (TWCR & 0x80) // ready when TWINT returns to logic 1.
+#define TW_STATUS (TWSR & 0xF8) // returns value of status register
+#define TW_SEND 0x84 // send data (TWINT,TWEN)
 
 
-
-#define USART_BAUDRATE 9600
-#define BAUD_PRESCALE (((F_CPU / (USART_BAUDRATE * 8UL)))-1)
-
-
-uint8_t test1, test1_alt, aaa,bbb,ccc, ddd, error;
-uint16_t zaehler, test2, test2_alt, test3;
-int32_t temperatur;
-uint32_t pressure, humidity;
-uint8_t sekunden, sekunden_alt, minuten, stunden;
-volatile uint8_t 	received_byte;
-int32_t temp, press, hum;
-uint16_t vork, nachk; 
+#define F_SCL 100000L // I2C clock speed 100 kHz
+//#define F_CPU 800000L // I2C clock speed 100 kHz
 
 uint8_t flag_send, flag_send_index;
 // String für Zahlenausgabe
 char string[30] = "";
-
+uint8_t addresse, stat, position;
 uint8_t ms, ms10,ms100,sec,min,entprell, state;
 uint8_t end_ms100, end_sec, end_min;
 enum state{WAIT, COUNT, TIME, TIME_WAIT,FLIGHT_TIME};
-
-/* Function prototypes */
-static void setup(void);
 
 static void setup(void)
 {
@@ -70,15 +52,6 @@ static void setup(void)
 	glcd_init();
 }
 
-ISR(USART_RX_vect)
-{
-	received_byte = UDR0;
-	//UDR0 = received_byte;//Echo Byte
-	/*uart_send_u16data(1234);
-	uart_send_char('\n');
-	uart_send_u8data(212);
-	uart_send_char('\n');*/
-} 
 ISR (TIMER1_COMPA_vect)
 {
 	ms10++;
@@ -100,56 +73,47 @@ ISR (TIMER1_COMPA_vect)
 	}
 }
 
-const unsigned char bitmap[] PROGMEM= 
-{ 
-	 0x3e, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 
-	 0xfe, 0xfe, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 
-	 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xf8, 0xf8, 
-	 0xf8, 0xf8, 0xc0, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0xe0, 0xf8, 0xf8, 0xf8, 0xf8, 0xfc, 0xfc, 0xfc, 
-	 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 
-	 0xfc, 0xfc, 0xfc, 0xfc, 0xfc, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 
-	 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0x3e, 0x28, 0x00, 0x00, 0x01, 0x03, 
-	 0x07, 0x07, 0x07, 0x8f, 0xcf, 0xcf, 0xcf, 0xcf, 0xc7, 0xc7, 0xe7, 
-	 0xe7, 0xe7, 0xe7, 0xe7, 0xe7, 0xe3, 0xf3, 0xf3, 0xf3, 0xf3, 0xf3, 
-	 0xf3, 0xfb, 0xfb, 0xf3, 0x87, 0x5f, 0x7f, 0xff, 0xff, 0xff, 0xfa, 
-	 0xf8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xc0, 0xf8, 0xff, 
-	 0xff, 0xff, 0xff, 0x3f, 0x83, 0xa3, 0xf3, 0xfb, 0xf3, 0xf3, 0xf3, 
-	 0xf3, 0xf3, 0xf3, 0xf3, 0xe3, 0xe7, 0xe7, 0xe7, 0xe7, 0xe7, 0xc7, 
-	 0xc7, 0xc7, 0xcf, 0xcf, 0xcf, 0xcf, 0x8f, 0x07, 0x07, 0x03, 0x03, 
-	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 
-	 0x07, 0x0f, 0x1f, 0x1f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x9f, 
-	 0x9f, 0x9f, 0xcf, 0xcf, 0xe7, 0xe7, 0xf7, 0xf3, 0xfb, 0xfb, 0xf9, 
-	 0xfc, 0xfc, 0xf4, 0xf1, 0x47, 0x1f, 0x1f, 0x3f, 0xff, 0xfe, 0xf8, 
-	 0xf8, 0xf8, 0xfe, 0x7e, 0x7f, 0x3f, 0x1f, 0x67, 0x65, 0xf1, 0xfc, 
-	 0xfc, 0xfc, 0xf9, 0xfb, 0xf3, 0xe7, 0xe7, 0xe7, 0xcf, 0xcf, 0xcf, 
-	 0x9f, 0x9f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x1f, 0x0f, 
-	 0x07, 0x07, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0x00, 0x02, 0x07, 0x0f, 0x0f, 0x1f, 0x3f, 0x3f, 
-	 0x3f, 0x3f, 0x3f, 0x1f, 0x1f, 0x1f, 0x0f, 0xe7, 0xf5, 0xf8, 0xfc, 
-	 0xff, 0xff, 0x7f, 0x7f, 0x3e, 0x01, 0x01, 0x01, 0x01, 0x01, 0x16, 
-	 0x3e, 0x7f, 0xff, 0xfe, 0xfe, 0xfd, 0xfb, 0xe7, 0xa7, 0x0f, 0x1f, 
-	 0x1f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x1f, 0x0f, 0x07, 0x02, 
-	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0xf0, 0x90, 0x90, 0x90, 0x60, 0x00, 0x00, 0x80, 
-	 0x40, 0x40, 0x40, 0x80, 0x00, 0xc0, 0x80, 0x40, 0xc0, 0x80, 0x40, 
-	 0x40, 0x80, 0x00, 0x00, 0x40, 0x40, 0x40, 0x80, 0x00, 0x00, 0xc0, 
-	 0x80, 0x40, 0x40, 0x80, 0x00, 0x00, 0x00, 0x00, 0xe0, 0x10, 0x10, 
-	 0x90, 0x90, 0xa0, 0x00, 0x00, 0xc0, 0x40, 0x40, 0x00, 0x80, 0x48, 
-	 0x40, 0x48, 0x80, 0x00, 0xc0, 0x80, 0x40, 0x40, 0x80, 0x00, 0x80, 
-	 0x40, 0x40, 0x40, 0x80, 0x00, 0xc0, 0x80, 0x40, 0x40, 0x00, 0x00, 
-	 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 
-	 0x00, 0x00, 0x01, 0x06, 0x00, 0x00, 0x03, 0x04, 0x04, 0x04, 0x03, 
-	 0x00, 0x07, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 
-	 0x07, 0x05, 0x05, 0x07, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x07, 
-	 0x00, 0x00, 0x00, 0x00, 0x03, 0x04, 0x04, 0x04, 0x04, 0x03, 0x00, 
-	 0x00, 0x07, 0x00, 0x00, 0x00, 0x03, 0x04, 0x04, 0x04, 0x03, 0x00, 
-	 0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x03, 0x05, 0x05, 0x05, 0x01, 
-	 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
- };
+void twi_Init(void)
+{
+ /* initialize TWI clock: 100 kHz clock, TWPS = 0 => prescaler = 1 */
+  
+  TWSR =0;                         /* no prescaler */
+  TWBR = ((8000000/400000)-16)/2;  /* (F_CPU / F_TWI) must be > 10 for stable operation */
+}
+ 
+void twi_Start(void)
+{
+	TWCR = ((1<<TWINT) | (1<<TWSTA) | (1<<TWEN));
+	while((TWCR & (1<<TWINT)) == 0);
+}
 
+void twi_Stop(void)
+{
+	TWCR = ((1<<TWINT) | (1<<TWSTO) | (1<<TWEN));
+} 
+
+void twi_Write(uint8_t u8data)
+{
+	TWDR = u8data;
+	TWCR = ((1<<TWINT) | (1<<TWEN));
+	while((TWCR & (1<<TWINT)) == 0);
+}
+uint8_t twi_GetStatus(void)
+{
+	/*  0x08   Start condition sent
+	 *  0x10   repeated start condition sent
+	 *  0x18   SLA+W transmitted ACK received
+	 *  0x20   SLA+W transmitted NACK received
+	 *  0x28   data byte sent ACK received
+	 *  0x30   data byte sent NACK received
+	 *  0x38   Arbitration in SLA+W lost
+	 */
+	 
+	uint8_t status;
+	//mask status
+	status = TWSR & 0xF8;
+	return status;
+}
 int main(void)
 {
 	/* Backlight pin PL3, set as output, set high for 100% output */
@@ -180,161 +144,56 @@ int main(void)
     TCCR1B |= (1 << CS12) | (1 << CS10);
     // set prescaler to 1024 and start the timer
 
-
-//Konfiguration UART
-  UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0);	//Turn on RX and TX circuits RXCIE0 enables Interrupt when byte received
-  UCSR0C = (1<<UCSZ01) | (1<<UCSZ00);	//8-Bit Char size
-  UBRR0H = (BAUD_PRESCALE >> 8);	//load upper 8-Bits of baud rate value into high byte of UBRR0H
-  UBRR0L = BAUD_PRESCALE;			//load lower 8-Bits of Baud rate into low byte of UBRR0L	
-
-    sei();
+    //sei();
     // enable interrupts
 	
 	setup();
 	
+	twi_Init();
+
+	glcd_tiny_set_font(Font5x7,5,7,32,127);
+	glcd_clear_buffer();
+	glcd_clear();
+		
+	addresse=0;
+	position=10;
 	
-	
-	
-	zaehler=222;
-	entprell=0;
-	test1=0;
-	test1_alt=0;
-	test2=0;
-	test2_alt=0;
-	ms10=0;
-	ms100=0;
-	sec=0;
-	min=0;
-	sekunden=0;
-	sekunden_alt=0;
-	minuten=0;
-	stunden=0;
-	test3=0;
-	aaa=255;
-	bbb=0;
-	ccc=0;
-	ddd=0;
-	temperatur=0;
-	error=0;
-	pressure = 0;
-	humidity = 0;
-	nachk =0;
-	vork =0;
-	flag_send=0;
-	flag_send_index=0;
 
 	
-		glcd_tiny_set_font(Font5x7,5,7,32,127);
-		glcd_clear_buffer();
-		
-	
-  
-		BME280_init();
-   BME280_set_filter(BME280_FILTER_16);
-	BME280_set_standby(BME280_TSB_10);
-   BME280_set_measure(BME280_OVER_16, BME280_HUM);
-   BME280_set_measure(BME280_OVER_16,  BME280_PRESS);
-   BME280_set_measure(BME280_OVER_16, BME280_TEMP);
-   BME280_set_measuremode(BME280_MODE_NORM);
-	
- 		
- 	
-		glcd_clear();
-		
-		/*
-		//wechselt die Bitreihenfolge
-		test2 = 255;
-		test3 = (test2>>8) | (test2<<8);
-		*/
-		
-		
-			
-		
 		while(1) 
 		{	
-			
-			
-			BME280_readout(&temp, &press, &hum);
+			for(addresse=0;addresse<255;addresse++)
+			{
+				//print addresse die gerade angeruffen wird
+				if((addresse==0xa1)||(addresse==0xef))addresse++;//addresse 0xa1 bleibt stehen Grund momentan nicht bekannt
+				sprintf(string,"check: 0x%02x",addresse);
+				glcd_draw_string_xy(0, 0,string);
 				
-			
-		
-			
-				sprintf(string,"Temp: %lu", temp);
-				glcd_draw_string_xy(0,0,string);
-			
-				sprintf(string,"pres %lu",press);
-				glcd_draw_string_xy(0,15,string);
+				twi_Start();									//TWI open
+				twi_Write(addresse);
+				if(0x18==twi_GetStatus())					//gibt ein Bauteil auf Addresse Antwort?
+				{
+					sprintf(string,"0x%x",addresse);
+					glcd_draw_string_xy(0, position,string);	//Addresse von antwortendem Bauteil ausgeben
+					position=position+10;								//cursor an naechste Position bewegen
+				}
+				twi_Stop();										//close TWI 
 				
-				sprintf(string,"hum %lu", hum);
-				glcd_draw_string_xy(0,30,string);
 				
-			/*
-			 * 
-			 * "Control characters
-				$P or $p= form feed
-				$L or $l= line feed
-				$R or $r= carriage return
-				$T or $t= tabulator
-				$N or $n= new line"
-			 * */
-			 
-			 if(flag_send==1)
-			 {
-				 if(flag_send_index==0)
-				 {
-					flag_send_index=1;
-					uart_send_char('A');
-					uart_send_char('\r');
-					uart_send_char('\n');
-					uart_send_string("Feuchtigkeit");
-					uart_send_char(';');
-					uart_send_string("Temperatur");
-					uart_send_char(';');
-					uart_send_string("Luftdruck");
-					uart_send_char('\r');
-					uart_send_char('\n');
-					uart_send_char(';');
-					uart_send_string("%");
-					uart_send_char(';');
-					uart_send_string("C");
-					uart_send_char(';');
-					uart_send_string("hPa");
-					uart_send_char('\r');
-					uart_send_char('\n');
-				 }
-					 
-				/*Umwandlung in Vorkomma und Nachkommawerte 
-				 * um ueber uart float uebertragen zu können*/
-				vork = hum/1024;
-				nachk = hum-vork*1024;
-							
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				uart_send_char(';');
-				
-				vork = temp /100;
-				nachk = temp-vork*100;
-				
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				uart_send_char(';');
-				
-				vork = press/100;
-				nachk = press-vork*100;
-				
-				uart_send_u16data(vork);
-				uart_send_char('.');
-				uart_send_u16data(nachk);
-				
-				uart_send_char('\r');
-				uart_send_char('\n');
+				_delay_ms(5);//Delay
+				glcd_write();//Display beschreiben
 			}
+				
+			glcd_draw_string_xy(0, 0,"scan finished");	
+			glcd_write();//Display beschreiben
+			
+			while(1);//stop program
 			
 			
 				
-
+		
+				
+		
 		
 		
 		if(T_RED)
@@ -352,7 +211,7 @@ int main(void)
 		}
 		
 	
-	glcd_write();
+	
 	}//End of while
 	
 	return 0;

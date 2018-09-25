@@ -40,7 +40,7 @@
 	#include <avr/io.h>
 	#include <avr/interrupt.h>
 	#include "devices/AVR8.h"
-	#define F_CPU 16000000UL  // 1 MHz
+	#define F_CPU 8000000UL  // 1 MHz
 	
 	#if !defined(GLCD_USE_AVR_DELAY)
 		extern void delay_ms(uint32_t ms);
